@@ -119,21 +119,19 @@ def _validate_batch_shapes(
     return nu, ny
 
 
-def _batch_mean_std(batch: Sequence[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
-    """Compute mean/std across all time samples in a batch."""
-    stacked = np.hstack(batch)
-    mean = stacked.mean(axis=1, keepdims=True)
-    std = stacked.std(axis=1, keepdims=True)
-    std = np.where(std < 1e-10, 1.0, std)
-    return mean, std
-
-
-def _normalize_batch(
-    batch: Sequence[np.ndarray], mean: np.ndarray, std: np.ndarray
-) -> list[np.ndarray]:
-    """Apply shared normalization to every trajectory in the batch."""
-    normalized = [ (arr - mean) / std for arr in batch ]
-    return normalized
+def _per_episode_norm(
+    batch: Sequence[np.ndarray],
+) -> tuple[list[np.ndarray], list[tuple[np.ndarray, np.ndarray]]]:
+    """Normalize each trajectory with its own mean/std."""
+    normalized: list[np.ndarray] = []
+    stats: list[tuple[np.ndarray, np.ndarray]] = []
+    for arr in batch:
+        mean = arr.mean(axis=1, keepdims=True)
+        std = arr.std(axis=1, keepdims=True)
+        std = np.where(std < 1e-10, 1.0, std)
+        normalized.append((arr - mean) / std)
+        stats.append((mean, std))
+    return normalized, stats
 
 
 def _blkhank(y: np.ndarray, i: int, j: int) -> np.ndarray:
@@ -832,16 +830,14 @@ def subspace_id(
         raise ValueError("regularization must be non-negative")
 
     # Normalize data for better conditioning
+    u_norm_stats = None
+    y_norm_stats = None
     if normalize:
-        u_mean, u_std = _batch_mean_std(u_batch)
-        y_mean, y_std = _batch_mean_std(y_batch)
-        u_norm_batch = _normalize_batch(u_batch, u_mean, u_std)
-        y_norm_batch = _normalize_batch(y_batch, y_mean, y_std)
+        u_norm_batch, u_norm_stats = _per_episode_norm(u_batch)
+        y_norm_batch, y_norm_stats = _per_episode_norm(y_batch)
     else:
         u_norm_batch = list(u_batch)
         y_norm_batch = list(y_batch)
-        u_std = np.ones((nu, 1))
-        y_std = np.ones((ny, 1))
 
     # Dispatch to algorithm (using normalized data)
     method_lower = method.lower()
@@ -870,25 +866,29 @@ def subspace_id(
     # Original:   y = y_std * (C_n @ x + D_n @ (u - u_mean)/u_std) + y_mean
     #               = (y_std * C_n) @ x + (y_std * D_n / u_std) @ u + offset
     # So: A unchanged, B /= u_std, C *= y_std, D *= y_std / u_std, K /= y_std
-    if normalize:
-        # u_std is (nu, 1), y_std is (ny, 1)
-        # B is (n, nu): divide each column j by u_std[j]
-        B_new = result.B / u_std.T
-        # C is (ny, n): multiply each row i by y_std[i]
-        C_new = result.C * y_std
-        # D is (ny, nu): multiply row i by y_std[i], divide col j by u_std[j]
-        D_new = result.D * y_std / u_std.T
-        # K is (n, ny): divide each column j by y_std[j]
-        K_new = result.K / y_std.T if result.K is not None else None
+    if normalize and u_norm_stats and y_norm_stats:
+        # Only rescale if a single shared normalization was applied.
+        if len(u_norm_stats) == 1 and len(y_norm_stats) == 1:
+            _, u_std = u_norm_stats[0]
+            _, y_std = y_norm_stats[0]
 
-        result = IdentificationResult(
-            A=result.A,
-            B=B_new,
-            C=C_new,
-            D=D_new,
-            n=result.n,
-            K=K_new,
-            singular_values=result.singular_values,
-        )
+            B_new = result.B / u_std.T
+            C_new = result.C * y_std
+            D_new = result.D * y_std / u_std.T
+            K_new = result.K / y_std.T if result.K is not None else None
+
+            result = IdentificationResult(
+                A=result.A,
+                B=B_new,
+                C=C_new,
+                D=D_new,
+                n=result.n,
+                K=K_new,
+                singular_values=result.singular_values,
+            )
+        else:
+            # Per-episode normalization makes a single rescaling ambiguous;
+            # return the model in its normalized coordinate system.
+            pass
 
     return result

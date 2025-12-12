@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 
 def _add_identify_to_path() -> None:
@@ -121,18 +122,18 @@ def main() -> None:
 
     stats: dict = {}
 
-    for method in methods:
+    for method in tqdm(methods, desc="Identification", unit="method"):
         try:
             result = subspace_id(
                 u_train_batch,
                 y_train_batch,
                 method=method,
-                horizon=20,
-                order=8,
-                past_horizon=20,
+                horizon=100,
+                order=10,
+                past_horizon=100,
                 feedthrough=False,
                 svd_threshold=0.1,
-                regularization=1e-3,
+                regularization=0.1,
             )
         except Exception as exc:  # noqa: BLE001
             # Record failure reason (without problematic YAML characters).
@@ -159,11 +160,11 @@ def main() -> None:
             e_tr = err_train[idx, :]
             e_te = err_test[idx, :]
             method_stats["train"][col] = {
-                "mean": float(np.mean(e_tr)),
+                "mse": float(np.mean(e_tr ** 2)),
                 "std": float(np.std(e_tr)),
             }
             method_stats["test"][col] = {
-                "mean": float(np.mean(e_te)),
+                "mse": float(np.mean(e_te ** 2)),
                 "std": float(np.std(e_te)),
             }
 
