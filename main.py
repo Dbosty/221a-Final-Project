@@ -128,12 +128,12 @@ def main() -> None:
                 u_train_batch,
                 y_train_batch,
                 method=method,
-                horizon=100,
-                order=10,
-                past_horizon=100,
+                horizon=50,
+                order=20,
+                past_horizon=50,
                 feedthrough=False,
-                svd_threshold=0.1,
-                regularization=0.1,
+                svd_threshold=0.9,
+                regularization=0.01,
             )
         except Exception as exc:  # noqa: BLE001
             # Record failure reason (without problematic YAML characters).
