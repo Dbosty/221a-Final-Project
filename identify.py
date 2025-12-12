@@ -18,7 +18,7 @@ References:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Sequence
 
 import numpy as np
 from numpy.linalg import lstsq, pinv, svd
@@ -80,6 +80,60 @@ def _ensure_2d(arr: np.ndarray) -> np.ndarray:
     if arr.shape[0] > arr.shape[1]:
         arr = arr.T
     return arr
+
+
+def _as_batch(data: np.ndarray | Sequence[np.ndarray]) -> list[np.ndarray]:
+    """Convert input data (array or list of arrays) into a batch list."""
+    if isinstance(data, (list, tuple)):
+        batch = [_ensure_2d(np.asarray(d, dtype=float)) for d in data]
+    else:
+        batch = [_ensure_2d(np.asarray(data, dtype=float))]
+    return batch
+
+
+def _validate_batch_shapes(
+    u_batch: Sequence[np.ndarray], y_batch: Sequence[np.ndarray]
+) -> tuple[int, int]:
+    """Ensure all batch elements share consistent shapes.
+
+    Returns:
+        Tuple (nu, ny) giving number of inputs/outputs.
+    """
+    if len(u_batch) == 0 or len(y_batch) == 0:
+        raise ValueError("At least one trajectory is required.")
+    if len(u_batch) != len(y_batch):
+        raise ValueError("Input and output batches must have equal length.")
+
+    nu = u_batch[0].shape[0]
+    ny = y_batch[0].shape[0]
+    for idx, (u_arr, y_arr) in enumerate(zip(u_batch, y_batch)):
+        if u_arr.shape[0] != nu:
+            raise ValueError(f"All inputs must have {nu} rows (episode {idx}).")
+        if y_arr.shape[0] != ny:
+            raise ValueError(f"All outputs must have {ny} rows (episode {idx}).")
+        if u_arr.shape[1] != y_arr.shape[1]:
+            raise ValueError(
+                f"Input/output length mismatch in episode {idx}: "
+                f"{u_arr.shape[1]} != {y_arr.shape[1]}"
+            )
+    return nu, ny
+
+
+def _batch_mean_std(batch: Sequence[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    """Compute mean/std across all time samples in a batch."""
+    stacked = np.hstack(batch)
+    mean = stacked.mean(axis=1, keepdims=True)
+    std = stacked.std(axis=1, keepdims=True)
+    std = np.where(std < 1e-10, 1.0, std)
+    return mean, std
+
+
+def _normalize_batch(
+    batch: Sequence[np.ndarray], mean: np.ndarray, std: np.ndarray
+) -> list[np.ndarray]:
+    """Apply shared normalization to every trajectory in the batch."""
+    normalized = [ (arr - mean) / std for arr in batch ]
+    return normalized
 
 
 def _blkhank(y: np.ndarray, i: int, j: int) -> np.ndarray:
@@ -181,8 +235,8 @@ def _extract_ac(
 
 
 def _n4sid(
-    u: np.ndarray,
-    y: np.ndarray,
+    u_batch: Sequence[np.ndarray],
+    y_batch: Sequence[np.ndarray],
     horizon: int,
     order: int | None,
     svd_threshold: float,
@@ -195,8 +249,8 @@ def _n4sid(
     Based on Van Overschee & De Moor formulation using oblique projection.
 
     Args:
-        u: Input data (nu x N).
-        y: Output data (ny x N).
+        u_batch: Sequence of input trajectories (nu x N_i).
+        y_batch: Sequence of output trajectories (ny x N_i).
         horizon: Future horizon (number of block rows k).
         order: System order (None for automatic selection).
         svd_threshold: Threshold for automatic order selection.
@@ -207,18 +261,28 @@ def _n4sid(
     Returns:
         IdentificationResult with identified system matrices.
     """
-    nu, N = u.shape
-    ny = y.shape[0]
+    nu = u_batch[0].shape[0]
+    ny = y_batch[0].shape[0]
     k = horizon
 
-    # Number of columns in Hankel matrices
-    j = N - 2 * k + 1
-    if j < 1:
-        raise ValueError(f"Insufficient data: need N > 2*horizon, got N={N}, horizon={k}")
+    U_blocks = []
+    Y_blocks = []
+    for ep_idx, (u_arr, y_arr) in enumerate(zip(u_batch, y_batch)):
+        N_ep = u_arr.shape[1]
+        j_ep = N_ep - 2 * k + 1
+        if j_ep < 1:
+            raise ValueError(
+                f"Episode {ep_idx} too short for horizon={k} (length={N_ep})."
+            )
+        U_blocks.append(_blkhank(u_arr, 2 * k, j_ep))
+        Y_blocks.append(_blkhank(y_arr, 2 * k, j_ep))
 
-    # Build block Hankel matrices with 2k block rows
-    U = _blkhank(u, 2 * k, j)
-    Y = _blkhank(y, 2 * k, j)
+    if not U_blocks:
+        raise ValueError("No usable episodes for N4SID.")
+
+    # Build block Hankel matrices with 2k block rows, concatenated across episodes
+    U = np.hstack(U_blocks)
+    Y = np.hstack(Y_blocks)
 
     # Split into past and future
     km = k * nu  # rows in past/future input blocks
@@ -323,8 +387,8 @@ def _n4sid(
 
 
 def _moesp(
-    u: np.ndarray,
-    y: np.ndarray,
+    u_batch: Sequence[np.ndarray],
+    y_batch: Sequence[np.ndarray],
     horizon: int,
     order: int | None,
     svd_threshold: float,
@@ -337,8 +401,8 @@ def _moesp(
     Based on Verhaegen & Dewilde formulation using orthogonal projection.
 
     Args:
-        u: Input data (nu x N).
-        y: Output data (ny x N).
+        u_batch: Sequence of input trajectories (nu x N_i).
+        y_batch: Sequence of output trajectories (ny x N_i).
         horizon: Number of block rows R.
         order: System order (None for automatic selection).
         svd_threshold: Threshold for automatic order selection.
@@ -349,18 +413,28 @@ def _moesp(
     Returns:
         IdentificationResult with identified system matrices.
     """
-    nu, N = u.shape
-    ny = y.shape[0]
+    nu = u_batch[0].shape[0]
+    ny = y_batch[0].shape[0]
     R = horizon
 
-    # Number of columns
-    j = N - R + 1
-    if j < 1:
-        raise ValueError(f"Insufficient data: need N >= horizon, got N={N}, horizon={R}")
+    U_blocks = []
+    Y_blocks = []
+    for ep_idx, (u_arr, y_arr) in enumerate(zip(u_batch, y_batch)):
+        N_ep = u_arr.shape[1]
+        j_ep = N_ep - R + 1
+        if j_ep < 1:
+            raise ValueError(
+                f"Episode {ep_idx} too short for horizon={R} (length={N_ep})."
+            )
+        U_blocks.append(_blkhank(u_arr, R, j_ep))
+        Y_blocks.append(_blkhank(y_arr, R, j_ep))
 
-    # Build block Hankel matrices
-    U = _blkhank(u, R, j)
-    Y = _blkhank(y, R, j)
+    if not U_blocks:
+        raise ValueError("No usable episodes for MOESP.")
+
+    # Build block Hankel matrices concatenated across all episodes
+    U = np.hstack(U_blocks)
+    Y = np.hstack(Y_blocks)
 
     km = R * nu  # rows of U
     kp = R * ny  # rows of Y
@@ -458,8 +532,8 @@ def _moesp(
 
 
 def _parsim_e(
-    u: np.ndarray,
-    y: np.ndarray,
+    u_batch: Sequence[np.ndarray],
+    y_batch: Sequence[np.ndarray],
     horizon: int,
     order: int | None,
     svd_threshold: float,
@@ -473,8 +547,8 @@ def _parsim_e(
     identification due to row-wise causality enforcement.
 
     Args:
-        u: Input data (nu x N).
-        y: Output data (ny x N).
+        u_batch: Sequence of input trajectories (nu x N_i).
+        y_batch: Sequence of output trajectories (ny x N_i).
         horizon: Future horizon f.
         order: System order (None for automatic selection).
         svd_threshold: Threshold for automatic order selection.
@@ -485,27 +559,38 @@ def _parsim_e(
     Returns:
         IdentificationResult with identified system matrices including Kalman gain K.
     """
-    nu, N = u.shape
-    ny = y.shape[0]
+    nu = u_batch[0].shape[0]
+    ny = y_batch[0].shape[0]
     f = horizon
     p = past_horizon
 
     # Data length check
     total_horizon = f + p
-    j = N - total_horizon + 1
-    if j < 1:
-        raise ValueError(
-            f"Insufficient data: need N >= f + p, got N={N}, f={f}, p={p}"
+    episode_data = []
+    total_columns = 0
+
+    for ep_idx, (u_arr, y_arr) in enumerate(zip(u_batch, y_batch)):
+        N_ep = u_arr.shape[1]
+        j_ep = N_ep - total_horizon + 1
+        if j_ep < 1:
+            raise ValueError(
+                f"Episode {ep_idx} too short for f={f}, p={p} (length={N_ep})."
+            )
+        Up_ep = _blkhank(u_arr[:, : N_ep - f + 1], p, j_ep)
+        Yp_ep = _blkhank(y_arr[:, : N_ep - f + 1], p, j_ep)
+        Zp_ep = np.vstack([Up_ep, Yp_ep])
+        Yf_ep = _blkhank(y_arr[:, p:], f, j_ep)
+        episode_data.append(
+            {"Zp": Zp_ep, "Yf": Yf_ep, "u": u_arr, "j": j_ep}
         )
+        total_columns += j_ep
 
-    # Build past data Hankel matrices
-    Up = _blkhank(u[:, : N - f + 1], p, j)  # Past inputs
-    Yp = _blkhank(y[:, : N - f + 1], p, j)  # Past outputs
-    Zp = np.vstack([Up, Yp])  # Combined past instrument
+    if total_columns < 1:
+        raise ValueError("No usable episodes for PARSIM-E.")
 
-    # Build future output rows
-    # Yf[i] corresponds to y_{k+i-1} for row i (1-indexed)
-    Yf_full = _blkhank(y[:, p:], f, j)
+    # Build combined past instrument and future outputs
+    Zp = np.hstack([ep["Zp"] for ep in episode_data])
+    Yf_full = np.hstack([ep["Yf"] for ep in episode_data])
 
     # Storage for Gamma*Lz estimates and innovation estimates
     GammaLz_list = []
@@ -528,9 +613,15 @@ def _parsim_e(
 
         if n_input_blocks > 0:
             Ui_rows = []
-            for idx in range(n_input_blocks):
-                u_row = u[:, p + idx : p + idx + j]
-                Ui_rows.append(u_row)
+            for idx_block in range(n_input_blocks):
+                block_segments = []
+                for ep in episode_data:
+                    j_ep = ep["j"]
+                    u_ep = ep["u"]
+                    block_segments.append(
+                        u_ep[:, p + idx_block : p + idx_block + j_ep]
+                    )
+                Ui_rows.append(np.hstack(block_segments))
             Ui = np.vstack(Ui_rows)
         else:
             Ui = None
@@ -645,8 +736,8 @@ def _parsim_e(
 
 
 def subspace_id(
-    u: np.ndarray,
-    y: np.ndarray,
+    u: np.ndarray | Sequence[np.ndarray],
+    y: np.ndarray | Sequence[np.ndarray],
     method: Literal["n4sid", "moesp", "parsim_e"] = "n4sid",
     horizon: int = 15,
     order: int | None = None,
@@ -663,8 +754,10 @@ def subspace_id(
         y[k]   = C @ x[k] + D @ u[k]
 
     Args:
-        u: Input data. Shape (N,) for SISO or (nu, N) for MIMO.
-        y: Output data. Shape (N,) for SISO or (ny, N) for MIMO.
+        u: Input data. Either a single array of shape (nu, N) or a
+            sequence of arrays (nu, N_i) representing multiple trajectories.
+        y: Output data. Either a single array of shape (ny, N) or a
+            sequence of arrays (ny, N_i) matching the input trajectories.
         method: Identification algorithm:
             - "n4sid": N4SID with oblique projection (default).
             - "moesp": MOESP with orthogonal projection.
@@ -716,17 +809,11 @@ def subspace_id(
         >>> result = subspace_id(u, y, method="n4sid", horizon=20, order=2, feedthrough=False)
         >>> ss = result.to_ss()
     """
-    # Validate and reshape inputs
-    u = _ensure_2d(np.asarray(u, dtype=float))
-    y = _ensure_2d(np.asarray(y, dtype=float))
+    # Validate and reshape inputs (allow batch of trajectories)
+    u_batch = _as_batch(u)
+    y_batch = _as_batch(y)
 
-    nu, N_u = u.shape
-    ny, N_y = y.shape
-
-    if N_u != N_y:
-        raise ValueError(f"Input and output must have same length: {N_u} != {N_y}")
-
-    N = N_u
+    nu, ny = _validate_batch_shapes(u_batch, y_batch)
 
     # Validate parameters
     if horizon < 2:
@@ -746,17 +833,13 @@ def subspace_id(
 
     # Normalize data for better conditioning
     if normalize:
-        u_mean = u.mean(axis=1, keepdims=True)
-        u_std = u.std(axis=1, keepdims=True)
-        u_std = np.where(u_std < 1e-10, 1.0, u_std)  # Avoid division by zero
-        u_norm = (u - u_mean) / u_std
-
-        y_mean = y.mean(axis=1, keepdims=True)
-        y_std = y.std(axis=1, keepdims=True)
-        y_std = np.where(y_std < 1e-10, 1.0, y_std)  # Avoid division by zero
-        y_norm = (y - y_mean) / y_std
+        u_mean, u_std = _batch_mean_std(u_batch)
+        y_mean, y_std = _batch_mean_std(y_batch)
+        u_norm_batch = _normalize_batch(u_batch, u_mean, u_std)
+        y_norm_batch = _normalize_batch(y_batch, y_mean, y_std)
     else:
-        u_norm, y_norm = u, y
+        u_norm_batch = list(u_batch)
+        y_norm_batch = list(y_batch)
         u_std = np.ones((nu, 1))
         y_std = np.ones((ny, 1))
 
@@ -764,17 +847,17 @@ def subspace_id(
     method_lower = method.lower()
     if method_lower == "n4sid":
         result = _n4sid(
-            u_norm, y_norm, horizon, order, svd_threshold, past_horizon,
+            u_norm_batch, y_norm_batch, horizon, order, svd_threshold, past_horizon,
             feedthrough, regularization
         )
     elif method_lower == "moesp":
         result = _moesp(
-            u_norm, y_norm, horizon, order, svd_threshold, past_horizon,
+            u_norm_batch, y_norm_batch, horizon, order, svd_threshold, past_horizon,
             feedthrough, regularization
         )
     elif method_lower == "parsim_e":
         result = _parsim_e(
-            u_norm, y_norm, horizon, order, svd_threshold, past_horizon,
+            u_norm_batch, y_norm_batch, horizon, order, svd_threshold, past_horizon,
             feedthrough, regularization
         )
     else:

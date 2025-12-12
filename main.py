@@ -65,6 +65,21 @@ def _simulate_outputs(u: np.ndarray, result, x0: np.ndarray | None = None) -> np
     return y_hat
 
 
+def _build_episode_batches(
+    df_segment: pd.DataFrame, seed_list: list[int], input_col: str, output_cols: list[str]
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Return per-episode input/output arrays in the specified order."""
+    u_batch: list[np.ndarray] = []
+    y_batch: list[np.ndarray] = []
+    for seed in seed_list:
+        seg = df_segment[df_segment["seed"] == seed].sort_values(["time"])
+        u_arr = seg[input_col].to_numpy().reshape(1, -1)
+        y_arr = seg[output_cols].to_numpy().T
+        u_batch.append(u_arr)
+        y_batch.append(y_arr)
+    return u_batch, y_batch
+
+
 def main() -> None:
     _add_identify_to_path()
     from identify import subspace_id  # type: ignore
@@ -91,11 +106,16 @@ def main() -> None:
     input_col = "motor_voltage"
     output_cols = ["servo_angle", "pendulum_angle"]
 
-    u_train = train_df[input_col].to_numpy().reshape(1, -1)
-    y_train = train_df[output_cols].to_numpy().T
+    u_train_batch, y_train_batch = _build_episode_batches(
+        train_df, list(train_seeds), input_col, output_cols
+    )
+    u_test_batch, y_test_batch = _build_episode_batches(
+        test_df, list(test_seeds), input_col, output_cols
+    )
 
-    u_test = test_df[input_col].to_numpy().reshape(1, -1)
-    y_test = test_df[output_cols].to_numpy().T
+    # Concatenate ground-truth outputs (ordered consistently with batches).
+    y_train = np.hstack(y_train_batch)
+    y_test = np.hstack(y_test_batch)
 
     methods = ["n4sid", "moesp", "parsim_e"]
 
@@ -104,8 +124,8 @@ def main() -> None:
     for method in methods:
         try:
             result = subspace_id(
-                u_train,
-                y_train,
+                u_train_batch,
+                y_train_batch,
                 method=method,
                 horizon=20,
                 order=8,
@@ -123,17 +143,12 @@ def main() -> None:
 
         # Simulate each episode separately to reset state and reduce
         # long-horizon drift for unstable models.
-        def simulate_by_seeds(df_segment: pd.DataFrame, seed_list: list[int]) -> np.ndarray:
-            yhats: list[np.ndarray] = []
-            for s in seed_list:
-                seg = df_segment[df_segment["seed"] == s].sort_values(["time"])
-                u_seg = seg[input_col].to_numpy().reshape(1, -1)
-                yhat_seg = _simulate_outputs(u_seg, result)
-                yhats.append(yhat_seg)
-            return np.concatenate(yhats, axis=1)
+        def simulate_batches(u_batch: list[np.ndarray]) -> np.ndarray:
+            yhats = [_simulate_outputs(u_seg, result) for u_seg in u_batch]
+            return np.hstack(yhats)
 
-        yhat_train = simulate_by_seeds(train_df, list(train_seeds))
-        yhat_test = simulate_by_seeds(test_df, list(test_seeds))
+        yhat_train = simulate_batches(u_train_batch)
+        yhat_test = simulate_batches(u_test_batch)
 
         err_train = y_train - yhat_train
         err_test = y_test - yhat_test
