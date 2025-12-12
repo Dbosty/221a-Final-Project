@@ -153,7 +153,7 @@ def main() -> None:
                 y_train_batch,
                 method=method,
                 horizon=50,
-                order=8, #8
+                order=10, #8
                 past_horizon=50,
                 feedthrough=False,
                 svd_threshold=0.9,
