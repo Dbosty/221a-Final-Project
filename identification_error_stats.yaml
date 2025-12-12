@@ -79,3 +79,30 @@ parsim_e:
     pendulum_angle_cos:
       mse: 59203952294.52495
       std: 243284.85533667743
+linear_baseline:
+  train:
+    servo_angle_sin:
+      mse: 1.088138953658169
+      std: 1.0391811335436463
+    servo_angle_cos:
+      mse: 0.8506203913298843
+      std: 0.7970596080965016
+    pendulum_angle_sin:
+      mse: 0.9987326175142184
+      std: 0.9993606908296376
+    pendulum_angle_cos:
+      mse: 0.9678560447449184
+      std: 0.9141216725646658
+  test:
+    servo_angle_sin:
+      mse: 1.110745693295509
+      std: 1.0502468717772817
+    servo_angle_cos:
+      mse: 0.8854429194860887
+      std: 0.7849663036001944
+    pendulum_angle_sin:
+      mse: 0.9247263654457663
+      std: 0.9616252467201517
+    pendulum_angle_cos:
+      mse: 1.0281412324786174
+      std: 0.8637446584611481
