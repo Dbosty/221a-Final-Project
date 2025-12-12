@@ -1,45 +1,81 @@
 n4sid:
   train:
-    servo_angle:
-      mse: 407213980860.5887
-      std: 635552.7665937605
-    pendulum_angle:
-      mse: 578547432134.7867
-      std: 750297.6651040585
+    servo_angle_sin:
+      mse: 3.9771755225590932
+      std: 1.9936984654253853
+    servo_angle_cos:
+      mse: 0.8186149687680756
+      std: 0.7399473848880489
+    pendulum_angle_sin:
+      mse: 1.6820047525519528
+      std: 1.2968476360548322
+    pendulum_angle_cos:
+      mse: 0.5975358106000868
+      std: 0.6531584677484352
   test:
-    servo_angle:
-      mse: 406300022090.12476
-      std: 630421.8221292282
-    pendulum_angle:
-      mse: 580704329960.7048
-      std: 742140.158081737
+    servo_angle_sin:
+      mse: 3.8194350889767867
+      std: 1.8477057758696944
+    servo_angle_cos:
+      mse: 0.6277532985226598
+      std: 0.6013624704942847
+    pendulum_angle_sin:
+      mse: 1.0343703162348783
+      std: 1.01646460622977
+    pendulum_angle_cos:
+      mse: 0.6167212961460192
+      std: 0.582790466700258
 moesp:
   train:
-    servo_angle:
-      mse: 2839.075822365458
-      std: 52.86854897730755
-    pendulum_angle:
-      mse: 600797.1283469559
-      std: 745.7244145808002
+    servo_angle_sin:
+      mse: 20.402635794887264
+      std: 4.516742636315423
+    servo_angle_cos:
+      mse: 35.17511898249258
+      std: 5.912322472699063
+    pendulum_angle_sin:
+      mse: 188.5141076575314
+      std: 13.729122647558436
+    pendulum_angle_cos:
+      mse: 32.28217537452892
+      std: 5.665901132021305
   test:
-    servo_angle:
-      mse: 2559.5722015194583
-      std: 49.54656204838846
-    pendulum_angle:
-      mse: 1006126.3833170439
-      std: 985.6492453937576
+    servo_angle_sin:
+      mse: 16.233112974701665
+      std: 3.991569393005461
+    servo_angle_cos:
+      mse: 11.12291390313253
+      std: 3.302054270794539
+    pendulum_angle_sin:
+      mse: 82.69188164966523
+      std: 9.093287350879864
+    pendulum_angle_cos:
+      mse: 17.690435036125418
+      std: 4.175763905192752
 parsim_e:
   train:
-    servo_angle:
-      mse: 7408232957.543501
-      std: 85040.70835323376
-    pendulum_angle:
-      mse: 18855896788.87001
-      std: 137027.7289082426
+    servo_angle_sin:
+      mse: 52971538910.678734
+      std: 230140.80919544864
+    servo_angle_cos:
+      mse: 38377198574.25999
+      std: 195872.29949790912
+    pendulum_angle_sin:
+      mse: 33262345622.197746
+      std: 182368.935408085
+    pendulum_angle_cos:
+      mse: 57590520931.90327
+      std: 239958.1950110168
   test:
-    servo_angle:
-      mse: 7187046739.517033
-      std: 84774.97806619872
-    pendulum_angle:
-      mse: 21394787732.933323
-      std: 146053.76450636075
+    servo_angle_sin:
+      mse: 52897932630.7508
+      std: 229984.4955440731
+    servo_angle_cos:
+      mse: 39110932250.28028
+      std: 197748.02864815306
+    pendulum_angle_sin:
+      mse: 33968862423.4943
+      std: 184268.28893269255
+    pendulum_angle_cos:
+      mse: 57298759646.87315
+      std: 239314.05366119952

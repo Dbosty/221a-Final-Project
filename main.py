@@ -66,19 +66,46 @@ def _simulate_outputs(u: np.ndarray, result, x0: np.ndarray | None = None) -> np
     return y_hat
 
 
+def _trig_transform(y_arr: np.ndarray, column_names: list[str]):
+    """Convert angle rows into sin/cos pairs in radians."""
+    features = []
+    names: list[str] = []
+    for row, name in zip(y_arr, column_names):
+        radians = np.deg2rad(row)
+        sin_row = np.sin(radians)
+        cos_row = np.cos(radians)
+        features.append(sin_row)
+        features.append(cos_row)
+        names.extend([f"{name}_sin", f"{name}_cos"])
+    return np.vstack(features), names
+
+
 def _build_episode_batches(
-    df_segment: pd.DataFrame, seed_list: list[int], input_col: str, output_cols: list[str]
-) -> tuple[list[np.ndarray], list[np.ndarray]]:
-    """Return per-episode input/output arrays in the specified order."""
+    df_segment: pd.DataFrame,
+    seed_list: list[int],
+    input_col: str,
+    output_cols: list[str],
+    use_trig: bool,
+) -> tuple[list[np.ndarray], list[np.ndarray], np.ndarray, list[str]]:
+    """Return per-episode input/output arrays and metadata."""
     u_batch: list[np.ndarray] = []
     y_batch: list[np.ndarray] = []
+    feature_names: list[str] | None = None
     for seed in seed_list:
         seg = df_segment[df_segment["seed"] == seed].sort_values(["time"])
         u_arr = seg[input_col].to_numpy().reshape(1, -1)
         y_arr = seg[output_cols].to_numpy().T
+        if use_trig:
+            y_arr, names = _trig_transform(y_arr, output_cols)
+            if feature_names is None:
+                feature_names = names
+        else:
+            if feature_names is None:
+                feature_names = output_cols
         u_batch.append(u_arr)
         y_batch.append(y_arr)
-    return u_batch, y_batch
+    y_concat = np.hstack(y_batch)
+    return u_batch, y_batch, y_concat, feature_names or output_cols
 
 
 def main() -> None:
@@ -106,17 +133,14 @@ def main() -> None:
 
     input_col = "motor_voltage"
     output_cols = ["servo_angle", "pendulum_angle"]
+    use_trig_transform = True
 
-    u_train_batch, y_train_batch = _build_episode_batches(
-        train_df, list(train_seeds), input_col, output_cols
+    u_train_batch, y_train_batch, y_train, feature_names = _build_episode_batches(
+        train_df, list(train_seeds), input_col, output_cols, use_trig_transform
     )
-    u_test_batch, y_test_batch = _build_episode_batches(
-        test_df, list(test_seeds), input_col, output_cols
+    u_test_batch, y_test_batch, y_test, _ = _build_episode_batches(
+        test_df, list(test_seeds), input_col, output_cols, use_trig_transform
     )
-
-    # Concatenate ground-truth outputs (ordered consistently with batches).
-    y_train = np.hstack(y_train_batch)
-    y_test = np.hstack(y_test_batch)
 
     methods = ["n4sid", "moesp", "parsim_e"]
 
@@ -129,11 +153,11 @@ def main() -> None:
                 y_train_batch,
                 method=method,
                 horizon=50,
-                order=20,
+                order=8, #8
                 past_horizon=50,
                 feedthrough=False,
                 svd_threshold=0.9,
-                regularization=0.01,
+                regularization=0.2, #0.01
             )
         except Exception as exc:  # noqa: BLE001
             # Record failure reason (without problematic YAML characters).
@@ -156,7 +180,7 @@ def main() -> None:
 
         method_stats = {"train": {}, "test": {}}
 
-        for idx, col in enumerate(output_cols):
+        for idx, col in enumerate(feature_names):
             e_tr = err_train[idx, :]
             e_te = err_test[idx, :]
             method_stats["train"][col] = {
