@@ -81,6 +81,27 @@ def _trig_transform(y_arr: np.ndarray, column_names: list[str]):
     return np.vstack(features), names
 
 
+def _compute_stats(batch: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    """Compute global mean/std across all samples in a batch."""
+    concat = np.hstack(batch)
+    mean = concat.mean(axis=1, keepdims=True)
+    std = concat.std(axis=1, keepdims=True)
+    std = np.where(std < 1e-9, 1.0, std)
+    return mean, std
+
+
+def _normalize_array(arr: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+    return (arr - mean) / std
+
+
+def _normalize_batch(batch: list[np.ndarray], mean: np.ndarray, std: np.ndarray) -> list[np.ndarray]:
+    return [_normalize_array(arr, mean, std) for arr in batch]
+
+
+def _denormalize_array(arr: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+    return arr * std + mean
+
+
 def _format_outputs(y_angles: np.ndarray, output_cols: list[str], use_trig: bool):
     if use_trig:
         y_trig, _ = _trig_transform(y_angles, output_cols)
@@ -257,23 +278,64 @@ def main() -> None:
     u_test_batch, y_test_batch, y_test, _ = _build_episode_batches(
         test_df, list(test_seeds), input_col, output_cols, use_trig_transform
     )
+    u_mean, u_std = _compute_stats(u_train_batch)
+    y_mean, y_std = _compute_stats(y_train_batch)
+    u_train_norm_batch = _normalize_batch(u_train_batch, u_mean, u_std)
+    y_train_norm_batch = _normalize_batch(y_train_batch, y_mean, y_std)
 
     methods = ["n4sid", "moesp", "parsim_e"]
+    default_cfg = {
+        "horizon": 15,
+        "order": None,
+        "past_horizon": 15,
+        "feedthrough": True,
+        "svd_threshold": 0.9,
+        "regularization": 1e-4,
+        "normalize": True,
+    }
+    method_overrides = {
+        "n4sid": {
+            "horizon": 20,
+            "order": 8,
+            "past_horizon": 20,
+            "svd_threshold": 0.9,
+            "regularization": 5e-5,
+        },
+        "moesp": {
+            "horizon": 10,
+            "order": 10,
+            "past_horizon": 10,
+            "feedthrough": False,
+            "svd_threshold": 0.9,
+            "regularization": 1e-3,
+            "normalize": True,
+        },
+        "parsim_e": {
+            "horizon": 3,
+            "order": 4,
+            "past_horizon": 9,
+            "svd_threshold": 0.95,
+            "regularization": 1e-2,
+            "normalize": True,
+        },
+    }
 
     stats: dict = {}
 
     for method in tqdm(methods, desc="Identification", unit="method"):
+        cfg = default_cfg | method_overrides.get(method, {})
         try:
             result = subspace_id(
-                u_train_batch,
-                y_train_batch,
+                u_train_norm_batch,
+                y_train_norm_batch,
                 method=method,
-                horizon=50,
-                order=10, #8
-                past_horizon=50,
-                feedthrough=False,
-                svd_threshold=0.9,
-                regularization=0.2, #0.01
+                horizon=cfg["horizon"],
+                order=cfg["order"],
+                past_horizon=cfg["past_horizon"],
+                feedthrough=cfg["feedthrough"],
+                svd_threshold=cfg["svd_threshold"],
+                regularization=cfg["regularization"],
+                normalize=cfg["normalize"],
             )
         except Exception as exc:  # noqa: BLE001
             # Record failure reason (without problematic YAML characters).
@@ -285,7 +347,12 @@ def main() -> None:
         # Simulate each episode separately to reset state and reduce
         # long-horizon drift for unstable models.
         def simulate_batches(u_batch: list[np.ndarray]) -> np.ndarray:
-            yhats = [_simulate_outputs(u_seg, result) for u_seg in u_batch]
+            yhats = []
+            for u_seg in u_batch:
+                u_norm = _normalize_array(u_seg, u_mean, u_std)
+                y_norm = _simulate_outputs(u_norm, result)
+                y_raw = _denormalize_array(y_norm, y_mean, y_std)
+                yhats.append(y_raw)
             return np.hstack(yhats)
 
         yhat_train = simulate_batches(u_train_batch)
