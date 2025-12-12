@@ -1,0 +1,45 @@
+n4sid:
+  train:
+    servo_angle:
+      mean: 16562.974945240054
+      std: 825002.0311742062
+    pendulum_angle:
+      mean: 9521.202577270456
+      std: 906266.7324999006
+  test:
+    servo_angle:
+      mean: -240927.73161274748
+      std: 786186.7524390211
+    pendulum_angle:
+      mean: -239590.34524642318
+      std: 875085.2931536287
+moesp:
+  train:
+    servo_angle:
+      mean: 6.863858725227304
+      std: 54.18918460872006
+    pendulum_angle:
+      mean: 220.65135850279358
+      std: 2371.0929025252653
+  test:
+    servo_angle:
+      mean: 10.62873455207022
+      std: 51.401208187105446
+    pendulum_angle:
+      mean: 22.81012490783793
+      std: 2329.0814077212312
+parsim_e:
+  train:
+    servo_angle:
+      mean: 793.8792604126855
+      std: 8045.721127287283
+    pendulum_angle:
+      mean: 1228.608089688321
+      std: 51800.742480446585
+  test:
+    servo_angle:
+      mean: -180.18099838527442
+      std: 6269.640896307681
+    pendulum_angle:
+      mean: -8674.732864809663
+      std: 50300.16601196635

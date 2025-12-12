@@ -409,8 +409,13 @@ def _moesp(
         for j_idx in range(R):
             XX_list.append(Z[:, j_idx * nu : (j_idx + 1) * nu])
 
-            # Build Rj matrix
-            Okj = Ok[: (R - j_idx) * ny, :] if j_idx < R else np.zeros((0, n))
+            # Build Rj matrix with exactly R*ny rows so that the
+            # multiplication U2.T @ Rj is dimensionally consistent.
+            # Use only (R-1-j_idx) output blocks from Ok to match kp = R*ny.
+            if j_idx < R - 1:
+                Okj = Ok[: (R - 1 - j_idx) * ny, :]
+            else:
+                Okj = np.zeros((0, n))
 
             Rj_top = np.zeros((j_idx * ny, ny + n))
             Rj_mid = np.hstack([np.eye(ny), np.zeros((ny, n))])
@@ -420,6 +425,7 @@ def _moesp(
                 Rj_bot = np.zeros((0, ny + n))
 
             Rj = np.vstack([Rj_top, Rj_mid, Rj_bot])
+            # Rj now has j_idx*ny + ny + (R-1-j_idx)*ny = R*ny rows, matching kp.
             RR_list.append(U2.T @ Rj)
 
         XX = np.vstack(XX_list)
