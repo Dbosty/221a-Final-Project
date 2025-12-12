@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 from scipy.signal import cont2discrete
 from tqdm import tqdm
 
@@ -215,6 +216,38 @@ def _compute_error_stats(err_train: np.ndarray, err_test: np.ndarray, feature_na
     return method_stats
 
 
+def _plot_error_curves(
+    y_true: np.ndarray,
+    predictions: dict[str, np.ndarray],
+    split: str,
+    out_dir: Path,
+    episode_lengths: list[int],
+) -> None:
+    fig, ax = plt.subplots(figsize=(10, 4))
+    plot_order = ["linear_baseline", "moesp", "n4sid"]
+    for label in plot_order:
+        y_hat = predictions.get(label)
+        if y_hat is None or y_hat.shape[1] != y_true.shape[1]:
+            continue
+        err = y_true - y_hat
+        mse_curve = np.mean(err**2, axis=0)
+        ax.plot(mse_curve, label=label)
+    idx = 0
+    total = y_true.shape[1]
+    for length in episode_lengths[:-1]:
+        idx += length
+        if 0 < idx < total:
+            ax.axvline(idx, color="gray", linestyle="--", alpha=0.3)
+    ax.set_title(f"MSE across trajectory ({split})")
+    ax.set_xlabel("Sample index")
+    ax.set_ylabel("Mean squared error")
+    ax.legend()
+    fig.tight_layout()
+    out_path = out_dir / f"mse_curve_{split}.png"
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
 def _build_episode_batches(
     df_segment: pd.DataFrame,
     seed_list: list[int],
@@ -321,6 +354,8 @@ def main() -> None:
     }
 
     stats: dict = {}
+    train_predictions: dict[str, np.ndarray | None] = {}
+    test_predictions: dict[str, np.ndarray | None] = {}
 
     for method in tqdm(methods, desc="Identification", unit="method"):
         cfg = default_cfg | method_overrides.get(method, {})
@@ -357,6 +392,9 @@ def main() -> None:
 
         yhat_train = simulate_batches(u_train_batch)
         yhat_test = simulate_batches(u_test_batch)
+        if method != "parsim_e":
+            train_predictions[method] = yhat_train
+            test_predictions[method] = yhat_test
 
         err_train = y_train - yhat_train
         err_test = y_test - yhat_test
@@ -371,6 +409,8 @@ def main() -> None:
 
     yhat_train_lin = simulate_linear_batches(u_train_batch)
     yhat_test_lin = simulate_linear_batches(u_test_batch)
+    train_predictions["linear_baseline"] = yhat_train_lin
+    test_predictions["linear_baseline"] = yhat_test_lin
     stats["linear_baseline"] = _compute_error_stats(
         y_train - yhat_train_lin, y_test - yhat_test_lin, feature_names
     )
@@ -378,6 +418,12 @@ def main() -> None:
     yaml_str = _simple_yaml_dump(stats)
     out_path = Path(__file__).with_name("identification_error_stats.yaml")
     out_path.write_text(yaml_str)
+
+    out_dir = Path(__file__).parent
+    train_lengths = [arr.shape[1] for arr in y_train_batch]
+    test_lengths = [arr.shape[1] for arr in y_test_batch]
+    _plot_error_curves(y_train, train_predictions, "train", out_dir, train_lengths)
+    _plot_error_curves(y_test, test_predictions, "test", out_dir, test_lengths)
 
 
 if __name__ == "__main__":
