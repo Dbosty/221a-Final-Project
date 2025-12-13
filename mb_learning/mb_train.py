@@ -84,6 +84,84 @@ class DynamicsModel(nn.Module):
         x = self.net(torch.cat([x, u], dim=1))  # Adding in the dx helped a lot with training!
         return x
 
+class LinearDynamicsModel(nn.Module):
+    """x_{t+1} = A x_t + B u_t"""
+    def __init__(self, n=4, m=1):
+        super().__init__()
+        self.linear = nn.Linear(n + m, n, bias=False)
+
+    def forward(self, x, u):
+        xu = torch.cat([x, u], dim=1)
+        return self.linear(xu)
+
+    def get_matrices(self):
+        W = self.linear.weight.data.cpu().numpy()
+        A = W[:, :4]
+        B = W[:, 4:]
+        return A, B
+
+class SystemIDTrainer:
+    def __init__(self, 
+                 model,
+                 optimizer,
+                 loss,
+                 file_path,
+                 lr=1e-3, 
+                 batch_size=256, 
+                 epochs=100):
+        self.model = model
+        self.optimizer = optimizer
+        self.loss = loss
+        self.lr = lr
+        self.bs = batch_size
+        self.e = epochs
+
+        self.file_path = file_path
+
+        self.dataset = MBLDataset(f"csvs/iped_train_{self.file_path}.csv")
+        self.X_train, self.X_val, self.U_train, \
+            self.U_val, self.Xn_train, self.Xn_val = self.dataset.create_train_split()
+
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=lr)
+        self.loss = nn.MSELoss()
+
+    def batches(self, X, U, Y):
+        idx = torch.randperm(len(X))
+        for i in range(0, len(X), self.bs):
+            j = idx[i:i+self.bs]
+            yield X[j], U[j], Y[j]
+
+    def train(self):
+        for ep in range(self.e):
+            self.model.train()
+            train_losses = []
+
+            for xb, ub, yb in self.batches(self.X_train, self.U_train, self.Xn_train):
+                pred = self.model(xb, ub)
+                loss = self.loss(pred, yb)
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+                train_losses.append(loss.item())
+
+            self.model.eval()
+            with torch.no_grad():
+                val_pred = self.model(self.X_val, self.U_val)
+                val_loss = self.loss(val_pred, self.Xn_val).item()
+
+            print(f"Epoch {ep+1:03d} | Train: {np.mean(train_losses):.6f} | Val: {val_loss:.6f}")
+
+    
+        A, B = self.model.get_matrices()
+        torch.save({
+        "model_state_dict": self.model.state_dict(),
+        "A": A,
+        "B": B,
+        "X_mean": self.dataset.X_mean,
+        "X_std": self.dataset.X_std,
+        "U_mean": self.dataset.U_mean,
+        "U_std": self.dataset.U_std,
+        }, f"runs/lin_model_{self.file_path}_{self.bs}_{self.lr}_{self.e}.pth")
 
 class MBLTrainer:
     """Model-based Learning Trainer"""
@@ -91,23 +169,26 @@ class MBLTrainer:
                  model,
                  optimizer,
                  loss,
-                 lr,
-                 bs,
-                 e,
-                 file_path
+                 file_path,
+                 lr=4e-3,
+                 batch_size=256,
+                 epochs=100
                 ):
-        
-        self.model = model
+
+        self.model     = model
         self.optimizer = optimizer
-        self.loss = loss
-        self.lr = lr
-        self.bs = bs
-        self.e = e
+        self.loss      = loss
+        self.lr        = lr
+        self.bs        = batch_size
+        self.e         = epochs
         self.file_path = file_path
 
         self.dataset = MBLDataset(f"csvs/iped_train_{self.file_path}.csv")
         self.X_train, self.X_val, self.U_train, \
             self.U_val, self.Xn_train, self.Xn_val = self.dataset.create_train_split()
+        
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=lr)
+        self.loss = nn.MSELoss()
 
     @staticmethod
     def get_batches(X, U, Y, bs):
@@ -151,39 +232,25 @@ class MBLTrainer:
             "X_std": self.dataset.X_std,
             "U_mean": self.dataset.U_mean,
             "U_std": self.dataset.U_std
-        }, f"runs/pendulum_model_{self.file_path}_{bs}_{lr}_{e}.pth")
+        }, f"runs/pendulum_model_{self.file_path}_{self.bs}_{self.lr}_{self.e}.pth")
     
         return self.model
 
 
-bs        = 256
-e         = 100
-lr        = 4e-3
-model     = DynamicsModel()
-loss      = nn.MSELoss()
-optimizer = optim.AdamW(model.parameters(), lr=lr)
-
 file_path = sys.argv[1]
-
-first  = "75_25"  # 75 - 25 split of the data
-second = "90_10"  # 90 - 10 split of the data
-
-# if sys.argv[1] == first:
-#     file_path = first
-
-# if sys.argv[1] == second:
-#     file_path = second
-
+if sys.argv[2] == "NonLin":
+    model = DynamicsModel()
+    loss      = nn.MSELoss()
+    optimizer = optim.AdamW(model.parameters(), lr=model.lr)
+    trainer = MBLTrainer(model, optimizer, loss, file_path)
+if sys.argv[2] == "Lin":
+    lr=1e-3
+    model     = LinearDynamicsModel()
+    loss      = nn.MSELoss()
+    optimizer = optim.AdamW(model.parameters(), lr=lr)
+    trainer   = SystemIDTrainer(model, optimizer, loss, file_path)
 
 
 if __name__ == "__main__":
-    trainer = MBLTrainer(model,
-                         optimizer,
-                         loss,
-                         lr,
-                         bs,
-                         e,
-                         file_path
-                        )
     
     trainer.train()
