@@ -1,6 +1,7 @@
 
 import sys
 import torch
+import numpy as np
 from mb_train import DynamicsModel, MBLDataset
 
 def eval(data):
@@ -45,37 +46,39 @@ def eval(data):
         return xs
 
 
-    steps = 300
-    pred_traj_norm = rollout(model, X_t[0], U_t, steps)
+    steps = 5001
+    # print(X_t.shape[0] / 5001)
+    pred_traj_norm = rollout(model, X_t[50], U_t, steps)
 
     # unnormalize
     pred_traj = pred_traj_norm.cpu().numpy() * X_std + X_mean
     true_traj = dataset.X_next[:steps+1]          
 
-    error = pred_traj - true_traj
+    error = abs(pred_traj - true_traj)
 
 
     import matplotlib.pyplot as plt
 
     state_names = ["theta", "theta_dot", "phi", "phi_dot"]
 
+    avg_errors = []
+    for ind, e in enumerate(error.T):
+        print(f"{state_names[ind]} avg error: {np.mean(e)}")
+        avg_errors.append(round(np.mean(e), 3))
+
     plt.figure(figsize=(12,6))
     for i in range(error.shape[1]):
-        plt.plot(error[:,i], label=f"{state_names[i]} error")
+        plt.plot(error[:,i], label=f"{state_names[i]} error ({round(avg_errors[i], 3)})")
     plt.axhline(0, color='k', linestyle='--', alpha=0.5)
     plt.legend()
-    plt.title("Prediction Error for All States")
+    plt.title(f"Prediction Error for All States")
     plt.xlabel("Time step")
     plt.ylabel("Error")
     plt.show()
 
+# first = "75_25"
+# second = "90_10"
 
-first = "75_25"
-second = "90_10"
 
-if sys.argv[1] == first:
-    eval(first)
-
-if sys.argv[1] == second:
-    eval(second)
+eval(sys.argv[1])
 

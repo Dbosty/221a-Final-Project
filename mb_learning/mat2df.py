@@ -69,23 +69,15 @@ df["servo_angle (rad)"] = phi
 
 df.to_csv("inv_pend_excite_data.csv")
 
-def get_train_test_data(data, train_amt):
+def get_train_test_data(data):
     """
     Splits the data into a train and test split. 
 
     data: Data to input 
     train_amt: Amount to put into train
     """
-    train_list = []
-    test_list = []
-    for seed in data["seed"].unique():
-        to_train = int(np.floor(len(data[data["seed"] == seed]) * train_amt))
-        df = data[data["seed"] == seed]
-        train_list.append(df.iloc[:to_train])
-        test_list.append(df.iloc[to_train:])
-
-    train = pd.concat(train_list, ignore_index=True)
-    test = pd.concat(test_list, ignore_index=True)
+    train = data[data["seed"] <= 57]
+    test = data[data["seed"] > 57]
 
     return train, test
     

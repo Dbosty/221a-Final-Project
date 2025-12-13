@@ -81,8 +81,8 @@ class DynamicsModel(nn.Module):
         )
 
     def forward(self, x, u):
-        dx = self.net(torch.cat([x, u], dim=1))  # Adding in the dx helped a lot with training!
-        return dx + x
+        x = self.net(torch.cat([x, u], dim=1))  # Adding in the dx helped a lot with training!
+        return x
 
 
 class MBLTrainer:
@@ -151,7 +151,7 @@ class MBLTrainer:
             "X_std": self.dataset.X_std,
             "U_mean": self.dataset.U_mean,
             "U_std": self.dataset.U_std
-        }, f"runs/pendulum_model_{file_path}_{bs}_{lr}_{e}.pth")
+        }, f"runs/pendulum_model_{self.file_path}_{bs}_{lr}_{e}.pth")
     
         return self.model
 
@@ -163,14 +163,16 @@ model     = DynamicsModel()
 loss      = nn.MSELoss()
 optimizer = optim.AdamW(model.parameters(), lr=lr)
 
+file_path = sys.argv[1]
+
 first  = "75_25"  # 75 - 25 split of the data
 second = "90_10"  # 90 - 10 split of the data
 
-if sys.argv[1] == first:
-    file_path = first
+# if sys.argv[1] == first:
+#     file_path = first
 
-if sys.argv[1] == second:
-    file_path = second
+# if sys.argv[1] == second:
+#     file_path = second
 
 
 
