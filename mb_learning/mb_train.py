@@ -239,9 +239,10 @@ class MBLTrainer:
 
 file_path = sys.argv[1]
 if sys.argv[2] == "NonLin":
-    model = DynamicsModel()
+    lr        = 4e-3
+    model     = DynamicsModel()
     loss      = nn.MSELoss()
-    optimizer = optim.AdamW(model.parameters(), lr=model.lr)
+    optimizer = optim.AdamW(model.parameters(), lr=lr)
     trainer = MBLTrainer(model, optimizer, loss, file_path)
 if sys.argv[2] == "Lin":
     lr=1e-3

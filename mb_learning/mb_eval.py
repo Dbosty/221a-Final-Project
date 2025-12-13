@@ -48,13 +48,13 @@ def eval(data):
 
     steps = 5001
     # print(X_t.shape[0] / 5001)
-    pred_traj_norm = rollout(model, X_t[50], U_t, steps)
+    pred_traj_norm = rollout(model, X_t[0], U_t, steps)
 
     # unnormalize
     pred_traj = pred_traj_norm.cpu().numpy() * X_std + X_mean
-    true_traj = dataset.X_next[:steps+1]          
+    true_traj = dataset.X_next[:steps+1]      
 
-    error = abs(pred_traj - true_traj)
+    error = np.sqrt((pred_traj - true_traj) ** 2)
 
 
     import matplotlib.pyplot as plt
@@ -68,12 +68,28 @@ def eval(data):
 
     plt.figure(figsize=(12,6))
     for i in range(error.shape[1]):
-        plt.plot(error[:,i], label=f"{state_names[i]} error ({round(avg_errors[i], 3)})")
+        plt.plot(error[:, i], label=f"{state_names[i]} error ({round(avg_errors[i], 3)})")
     plt.axhline(0, color='k', linestyle='--', alpha=0.5)
     plt.legend()
     plt.title(f"Prediction Error for All States")
     plt.xlabel("Time step")
     plt.ylabel("Error")
+    plt.show()
+
+
+    time = np.arange(len(pred_traj))
+
+    plt.figure(figsize=(12, 8))
+    for i in range(4):
+        plt.subplot(4, 1, i+1)
+        plt.plot(time, true_traj[:, i], label="True")
+        plt.plot(time, pred_traj[:, i], "--", label="Pred")
+        plt.ylabel(state_names[i])
+        if i == 0:
+            plt.legend()
+    plt.xlabel("Time step")
+    plt.suptitle("Linear Model Rollout vs Ground Truth")
+    plt.tight_layout()
     plt.show()
 
 # first = "75_25"

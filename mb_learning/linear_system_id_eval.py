@@ -86,12 +86,33 @@ if __name__ == "__main__":
     mean_err, std_err = one_step_error(A, B, X, U, X_next)
     print(f"One-step prediction error: mean={mean_err:.6f}, std={std_err:.6f}")
 
-    T = 300
-    x0 = X[0]
+    T = 5001
+    x0 = X[5002]
     U_roll = U[:T]
 
     X_hat = rollout(A, B, x0, U_roll)
     X_true = X[:T+1]
+
+    error = np.sqrt((X_hat - X_true) ** 2)
+
+    import matplotlib.pyplot as plt
+
+    state_names = ["theta", "theta_dot", "phi", "phi_dot"]
+
+    avg_errors = []
+    for ind, e in enumerate(error.T):
+        print(f"{state_names[ind]} avg error: {np.mean(e)}")
+        avg_errors.append(round(np.mean(e), 3))
+
+    plt.figure(figsize=(12,6))
+    for i in range(error.shape[1]):
+        plt.plot(error[:,i], label=f"{state_names[i]} error ({round(avg_errors[i], 3)})")
+    plt.axhline(0, color='k', linestyle='--', alpha=0.5)
+    plt.legend()
+    plt.title(f"Prediction Error for All States")
+    plt.xlabel("Time step")
+    plt.ylabel("Error")
+    plt.show()
 
     labels = ["theta", "theta_dot", "phi", "phi_dot"]
     time = np.arange(len(X_hat))
@@ -113,3 +134,6 @@ if __name__ == "__main__":
     print("Eigenvalues of A:")
     for ev in eigs:
         print(f"  {ev:.4f}")
+    
+    print(f"A: {A}")
+    print(f"B: {B}")
